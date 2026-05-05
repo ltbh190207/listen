@@ -341,11 +341,10 @@ input[type=range] { accent-color: var(--gold); cursor: pointer; }
   color: var(--t2);
 }
 .cau-body.reading-now { background: var(--gold-dim); color: var(--t1); }
-.cau-body b { color: var(--t1); font-weight: 700; }
-.cau-body .highlight { background: rgba(240,180,41,.3); border-radius: 2px; padding: 0 2px; color: var(--gold2); }
-.cau-content { padding: 14px 16px; background: var(--s1); font-size: 14px; line-height: 1.9; color: var(--t2); }
+.cau-content { padding: 14px 16px; background: var(--s1); font-size: 14px; line-height: 1.9; color: var(--t2); cursor: text; }
 .cau-content.reading-now { background: var(--gold-dim); color: var(--t1); }
-[contenteditable]:focus { outline: none; background: rgba(240,180,41,0.05); border-radius: 4px; }
+[contenteditable] { cursor: text; -webkit-user-modify: read-write-plaintext-only; }
+[contenteditable]:focus { outline: none; background: rgba(240,180,41,0.08); border-radius: 4px; box-shadow: inset 0 0 0 1px var(--gold-glow); }
 
 /* Selection popup */
 #sel-popup {
@@ -1435,6 +1434,12 @@ document.getElementById('textArea').addEventListener('mouseup', showSelPopup);
 document.getElementById('textArea').addEventListener('touchend', showSelPopup);
 
 function showSelPopup(e) {
+  // Nếu đang focus vào một ô chỉnh sửa, không hiện popup bôi đen
+  if (document.activeElement && document.activeElement.getAttribute('contenteditable') === 'true') {
+    closeSelPopup();
+    return;
+  }
+
   const sel = window.getSelection();
   const text = sel?.toString().trim();
   if (!text || text.length < 5) { closeSelPopup(); return; }
