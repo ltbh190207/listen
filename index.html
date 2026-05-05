@@ -570,6 +570,11 @@ input[type=range] { accent-color: var(--gold); cursor: pointer; }
   .player-prog { order: 3; width: 100%; }
   .player-sentence { max-width: none; }
   
+  .btn-txt { display: none; }
+  .btn-upload-hdr { padding: 8px; }
+  .logo-txt { display: none; }
+  .hdr-sep { display: none; }
+  
   #mobile-overlay {
     position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 90;
     display: none; backdrop-filter: blur(2px);
@@ -593,21 +598,26 @@ input[type=range] { accent-color: var(--gold); cursor: pointer; }
 
 <!-- HEADER -->
 <div class="hdr">
-  <div class="nav-btn" onclick="togglePanel('left')" style="display:none">
+  <div class="nav-btn" onclick="togglePanel('left')">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
   </div>
   <div class="logo">
     <div class="logo-icon">🎙</div>
     <span class="logo-txt">VoiceDoc</span>
   </div>
-  <span class="hdr-tag" style="display:none">Đọc tài liệu</span>
   <div class="hdr-sep"></div>
-  <label class="btn-upload-hdr" for="fInp">
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
-    <span class="btn-txt">Tải file (.docx, .pdf...)</span>
-  </label>
+  <div style="display:flex; gap:6px; align-items:center">
+    <button class="btn-upload-hdr" onclick="addNewDoc()" title="Tự nhập văn bản" style="background:var(--blue); color:#fff">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+      <span class="btn-txt">Tự nhập</span>
+    </button>
+    <label class="btn-upload-hdr" for="fInp">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+      <span class="btn-txt">Tải file</span>
+    </label>
+  </div>
   <input type="file" id="fInp" accept=".docx,.pptx,.txt,.pdf" multiple>
-  <div class="nav-btn" onclick="togglePanel('right')" style="display:none">
+  <div class="nav-btn" onclick="togglePanel('right')">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
   </div>
 </div>
@@ -620,7 +630,6 @@ input[type=range] { accent-color: var(--gold); cursor: pointer; }
   <div class="left-panel">
     <div class="panel-hdr">
       Tài liệu
-      <button class="rp-btn" style="width:22px;height:22px" onclick="addNewDoc()" title="Thêm văn bản mới">+</button>
       <span id="docCount" class="queue-badge">0</span>
     </div>
     <div class="doc-list" id="docList"></div>
