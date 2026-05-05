@@ -343,6 +343,7 @@ input[type=range] { accent-color: var(--gold); cursor: pointer; }
 .cau-body.reading-now { background: var(--gold-dim); color: var(--t1); }
 .cau-body b { color: var(--t1); font-weight: 700; }
 .cau-body .highlight { background: rgba(240,180,41,.3); border-radius: 2px; padding: 0 2px; color: var(--gold2); }
+[contenteditable]:focus { outline: none; background: rgba(240,180,41,0.05); border-radius: 4px; }
 
 /* Selection popup */
 #sel-popup {
@@ -619,6 +620,7 @@ input[type=range] { accent-color: var(--gold); cursor: pointer; }
   <div class="left-panel">
     <div class="panel-hdr">
       Tài liệu
+      <button class="rp-btn" style="width:22px;height:22px" onclick="addNewDoc()" title="Thêm văn bản mới">+</button>
       <span id="docCount" class="queue-badge">0</span>
     </div>
     <div class="doc-list" id="docList"></div>
@@ -643,7 +645,7 @@ input[type=range] { accent-color: var(--gold); cursor: pointer; }
         <input type="range" min="12" max="22" value="15" id="fszRange" oninput="setFontSize(this.value)" style="width:70px">
         <span class="vbar-val" id="fszVal">15px</span>
       </div>
-      <span class="hint-tag">💡 Bôi đen để chọn đoạn</span>
+      <span class="hint-tag">💡 Nhấn vào chữ để sửa trực tiếp</span>
     </div>
     <div class="text-area" id="textArea">
       <div class="empty-v">
@@ -1133,11 +1135,26 @@ function renderDocList() {
 
 function selectDoc(id) {
   if (state.playing) stopAll();
-  state.activeDoc = state.docs.find(d => d.id === id);
+  state.activeDoc = state.docs.find(d => d.id == id);
   renderDocList();
   if (!state.activeDoc) return;
   document.getElementById('vTitle').textContent = state.activeDoc.name;
   renderTextView();
+}
+
+function addNewDoc() {
+  const name = prompt("Nhập tên văn bản:", "Văn bản mới " + (state.docs.length + 1));
+  if (name === null) return;
+  const doc = {
+    id: Date.now(),
+    name: name || "Chưa đặt tên",
+    ext: 'txt',
+    raw: '',
+    caus: [{ id: 1, label: 'Đoạn 1', question: 'Nhập tiêu đề hoặc câu hỏi ở đây...', body: ['Nhấn vào đây để bắt đầu nhập nội dung của bạn...'], chap: '' }]
+  };
+  state.docs.push(doc);
+  renderDocList();
+  selectDoc(doc.id);
 }
 
 function removeDoc(e, id) {
@@ -1172,17 +1189,35 @@ function renderTextView() {
       <div class="cau-block ${inQ?'in-queue':''}" id="cb-${c.id}">
         <div class="cau-hdr">
           <span class="cau-num">${esc(c.label)}</span>
-          <span class="cau-question">${esc(c.question)}</span>
+          <span class="cau-question" contenteditable="true" onblur="updateCauText(${c.id}, 'question', this.innerText)">${esc(c.question)}</span>
           <div class="cau-actions">
             <button class="btn-add-queue ${inQ?'in-queue':''}" id="qaBtn-${c.id}" onclick="toggleCauQueue(${c.id})">
               ${inQ ? '✓ Đã thêm' : '+ Thêm'}
             </button>
           </div>
         </div>
-        <div class="cau-body" id="cbody-${c.id}">${bodyHtml}</div>
+        <div class="cau-body" id="cbody-${c.id}" contenteditable="true" onblur="updateCauText(${c.id}, 'body', this.innerText)">${bodyHtml}</div>
       </div>`;
   });
   area.innerHTML = html;
+}
+
+function updateCauText(cauId, field, value) {
+  if (!state.activeDoc) return;
+  const cau = state.activeDoc.caus.find(c => c.id === cauId);
+  if (!cau) return;
+  if (field === 'question') {
+    cau.question = value;
+  } else {
+    cau.body = value.split('\n').filter(l => l.trim());
+  }
+  // Nếu câu này đang trong hàng chờ, cập nhật text trong hàng chờ
+  state.queue.forEach(q => {
+    if (q.cauId === cauId && q.type === 'cau') {
+      q.text = [cau.question, ...cau.body].filter(Boolean).join('. ');
+    }
+  });
+  renderQueueList();
 }
 
 function isInQueue(cauId, type) {
