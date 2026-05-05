@@ -343,6 +343,8 @@ input[type=range] { accent-color: var(--gold); cursor: pointer; }
 .cau-body.reading-now { background: var(--gold-dim); color: var(--t1); }
 .cau-body b { color: var(--t1); font-weight: 700; }
 .cau-body .highlight { background: rgba(240,180,41,.3); border-radius: 2px; padding: 0 2px; color: var(--gold2); }
+.cau-content { padding: 14px 16px; background: var(--s1); font-size: 14px; line-height: 1.9; color: var(--t2); }
+.cau-content.reading-now { background: var(--gold-dim); color: var(--t1); }
 [contenteditable]:focus { outline: none; background: rgba(240,180,41,0.05); border-radius: 4px; }
 
 /* Selection popup */
@@ -715,17 +717,17 @@ input[type=range] { accent-color: var(--gold); cursor: pointer; }
       <div class="rp-sec-title">⚙️ Điều chỉnh</div>
       <div class="ctrl-row">
         <label>Tốc độ</label>
-        <input type="range" min="0.5" max="2" step="0.1" value="1" id="rateR" oninput="state.rate=+this.value;document.getElementById('rateV').textContent=state.rate.toFixed(1)+'×'">
+        <input type="range" min="0.5" max="2" step="0.1" value="1" id="rateR" oninput="updateRate(this.value)">
         <span class="cval" id="rateV">1.0×</span>
       </div>
       <div class="ctrl-row">
         <label>Âm lượng</label>
-        <input type="range" min="0" max="1" step="0.05" value="0.9" id="volR" oninput="state.vol=+this.value;document.getElementById('volV').textContent=Math.round(state.vol*100)+'%'">
+        <input type="range" min="0" max="1" step="0.05" value="0.9" id="volR" oninput="updateVol(this.value)">
         <span class="cval" id="volV">90%</span>
       </div>
       <div class="ctrl-row">
         <label>Ngắt nghỉ</label>
-        <input type="range" min="0" max="3000" step="250" value="500" id="pauseR" oninput="state.pauseMs=+this.value;document.getElementById('pauseV').textContent=(state.pauseMs/1000).toFixed(2)+'s'">
+        <input type="range" min="0" max="3000" step="250" value="500" id="pauseR" oninput="updatePause(this.value)">
         <span class="cval" id="pauseV">0.50s</span>
       </div>
       <div class="ctrl-row">
@@ -1055,13 +1057,7 @@ async function processFile(file) {
     if (!text?.trim()) { alert('File rỗng hoặc không đọc được'); hideLoad(); return; }
 
     const caUs = parseCau(text);
-    const doc = {
-      id: Date.now() + Math.random(),
-      name: file.name,
-      ext,
-      raw: text,
-      caus: caUs
-    };
+    const doc = { id: Date.now() + Math.random(), name: file.name, ext, raw: text, caus: caUs };
     state.docs.push(doc);
     renderDocList();
     selectDoc(doc.id);
@@ -1111,8 +1107,9 @@ async function readPdf(file) {
 function parseCau(text) {
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
   const caus = [];
-  // Match patterns: "Câu X:", "Câu X (đã thi):", "Câu số X:", numbered items like "1.", question-like lines
-  const cauPattern = /^(Câu\s*\d+[^:]*:|Câu\s+\w+\s*:|\d+[\.\)]\s+[A-ZÁÀẢÃẠĂẮẶẰẲẴÂẤẬẦẨẪĐÉÈẺẼẸÊẾỆỀỂỄÍÌỈĨỊÓÒỎÕỌÔỐỘỒỔỖƠỚỢỜỞỠÚÙỦŨỤƯỨỰỪỬỮÝỲỶỸỴ])/ui;
+  
+  // Ưu tiên nhận diện "Câu X:" hoặc "Câu X."
+  const cauPattern = /^Câu\s*\d+[^:]*[:\.]/i;
   const chapPattern = /^(CHƯƠNG|Phần|Chapter|PHẦN)/i;
 
   let curCau = null;
@@ -1124,32 +1121,47 @@ function parseCau(text) {
       chapLabel = line;
       continue;
     }
+    
     const isCau = cauPattern.test(line);
     if (isCau) {
       if (curCau) caus.push(curCau);
       cauCounter++;
-      // Extract question number and question text
-      const match = line.match(/^(Câu\s*\d+[^:]*:?|\d+[\.\)]\s*)/i);
-      const label = match ? match[0].replace(/:$/, '').trim() : `Câu ${cauCounter}`;
-      const question = line.replace(match?.[0] || '', '').replace(/^:?\s*/, '').trim();
-      curCau = { id: cauCounter, label, question: question || line, body: [], chap: chapLabel };
+      
+      const match = line.match(/^Câu\s*\d+[^:]*[:\.]\s*/i);
+      const label = match ? match[0].trim().replace(/[:\.]$/, '') : `Câu ${cauCounter}`;
+      const question = line.replace(match?.[0] || '', '').trim();
+      
+      curCau = { id: cauCounter, label, question: question || "...", body: [], chap: chapLabel };
     } else if (curCau) {
       curCau.body.push(line);
     } else {
-      // Before first câu - create generic block
       cauCounter++;
       curCau = { id: cauCounter, label: `Đoạn ${cauCounter}`, question: '', body: [line], chap: chapLabel };
     }
   }
   if (curCau) caus.push(curCau);
 
-  // If no câu detected, split by paragraphs
-  if (caus.length === 0) {
-    const paras = text.split(/\n{2,}/).filter(p => p.trim());
-    return paras.map((p, i) => ({
-      id: i + 1, label: `Đoạn ${i + 1}`, question: '', body: [p.trim()], chap: ''
-    }));
+  // Fallback nếu không thấy từ "Câu"
+  if (caus.length <= 1 && !text.toLowerCase().includes('câu')) {
+    const backupCaus = [];
+    let bCounter = 0;
+    const numberedPattern = /^\d+[\.\)]\s+/;
+    
+    for (const line of lines) {
+      if (numberedPattern.test(line)) {
+        bCounter++;
+        const match = line.match(/^\d+[\.\)]\s*/);
+        backupCaus.push({ id: bCounter, label: match[0].trim(), question: line.replace(match[0], ''), body: [], chap: '' });
+      } else if (backupCaus.length > 0) {
+        backupCaus[backupCaus.length - 1].body.push(line);
+      } else {
+        bCounter++;
+        backupCaus.push({ id: bCounter, label: `Đoạn ${bCounter}`, question: '', body: [line], chap: '' });
+      }
+    }
+    return backupCaus.length > 0 ? backupCaus : caus;
   }
+  
   return caus;
 }
 
@@ -1271,29 +1283,34 @@ function renderTextView() {
       <div class="cau-block ${inQ?'in-queue':''}" id="cb-${c.id}">
         <div class="cau-hdr">
           <span class="cau-num">${esc(c.label)}</span>
-          <span class="cau-question" contenteditable="true" onblur="updateCauText(${c.id}, 'question', this.innerText)">${esc(c.question)}</span>
           <div class="cau-actions">
             <button class="btn-add-queue ${inQ?'in-queue':''}" id="qaBtn-${c.id}" onclick="toggleCauQueue(${c.id})">
               ${inQ ? '✓ Đã thêm' : '+ Thêm'}
             </button>
           </div>
         </div>
-        <div class="cau-body" id="cbody-${c.id}" contenteditable="true" onblur="updateCauText(${c.id}, 'body', this.innerText)">${bodyHtml}</div>
+        <div class="cau-content" id="ccontent-${c.id}" contenteditable="true" onblur="updateCauText(${c.id}, this)">
+          <div class="cau-q-text" style="font-weight:700; color:var(--t1); margin-bottom:8px">${esc(c.question)}</div>
+          <div class="cau-b-text" style="color:var(--t2)">${bodyHtml}</div>
+        </div>
       </div>`;
   });
   area.innerHTML = html;
 }
 
-function updateCauText(cauId, field, value) {
+function updateCauText(cauId, el) {
   if (!state.activeDoc) return;
   const cau = state.activeDoc.caus.find(c => c.id === cauId);
   if (!cau) return;
-  if (field === 'question') {
-    cau.question = value;
-  } else {
-    cau.body = value.split('\n').filter(l => l.trim());
-  }
-  // Nếu câu này đang trong hàng chờ, cập nhật text trong hàng chờ
+  
+  const qEl = el.querySelector('.cau-q-text');
+  const bEl = el.querySelector('.cau-b-text');
+  
+  cau.question = qEl ? qEl.innerText.trim() : "";
+  // Lấy các dòng từ body, bỏ qua các thẻ p nếu cần
+  cau.body = bEl ? bEl.innerText.split('\n').filter(l => l.trim()) : [];
+  
+  // Cập nhật hàng chờ
   state.queue.forEach(q => {
     if (q.cauId === cauId && q.type === 'cau') {
       q.text = [cau.question, ...cau.body].filter(Boolean).join('. ');
@@ -1606,9 +1623,9 @@ function skipPrev() {
 function highlightReading(cauId, on) {
   if (!cauId) return;
   const cb = document.getElementById(`cb-${cauId}`);
-  const cbody = document.getElementById(`cbody-${cauId}`);
+  const ccontent = document.getElementById(`ccontent-${cauId}`);
   cb?.classList.toggle('reading-now', on);
-  cbody?.classList.toggle('reading-now', on);
+  ccontent?.classList.toggle('reading-now', on);
   if (on && cb) cb.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
@@ -1655,6 +1672,33 @@ function setStateBadge(type) {
 /* ============================================================
    UTILS
 ============================================================ */
+function updateRate(v) {
+  state.rate = +v;
+  document.getElementById('rateV').textContent = state.rate.toFixed(1) + '×';
+  restartCurrentIfPlaying();
+}
+function updateVol(v) {
+  state.vol = +v;
+  document.getElementById('volV').textContent = Math.round(state.vol * 100) + '%';
+  restartCurrentIfPlaying();
+}
+function updatePause(v) {
+  state.pauseMs = +v;
+  document.getElementById('pauseV').textContent = (state.pauseMs / 1000).toFixed(2) + 's';
+}
+
+let restartTimer = null;
+function restartCurrentIfPlaying() {
+  if (state.playing && !state.paused) {
+    // Thêm debounce để tránh lag khi kéo slider nhanh
+    clearTimeout(restartTimer);
+    restartTimer = setTimeout(() => {
+      synth.cancel();
+      speakCurrent();
+    }, 200);
+  }
+}
+
 function setFontSize(v) {
   document.getElementById('textArea').style.fontSize = v + 'px';
   document.getElementById('fszVal').textContent = v + 'px';
