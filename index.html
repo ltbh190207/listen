@@ -687,6 +687,28 @@ body.focus-active .cau-block.reading-now {
   align-items: center; justify-content: center;
   cursor: pointer;
 }
+/* Onboarding Modal */
+#onboardingModal {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.85);
+  backdrop-filter: blur(12px); z-index: 20000;
+  display: none; align-items: center; justify-content: center; padding: 20px;
+}
+.ob-card {
+  background: var(--s1); border: 1px solid var(--border2);
+  border-radius: 24px; width: 100%; max-width: 500px;
+  overflow: hidden; display: flex; flex-direction: column;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+  position: relative;
+}
+.ob-slides { display: flex; transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+.ob-slide { min-width: 100%; padding: 40px; text-align: center; }
+.ob-icon { font-size: 60px; margin-bottom: 20px; display: block; }
+.ob-title { font-size: 24px; font-weight: 800; color: var(--gold); margin-bottom: 12px; }
+.ob-text { font-size: 15px; color: var(--t2); line-height: 1.7; }
+.ob-btns { padding: 20px 40px 40px; display: flex; gap: 12px; justify-content: center; }
+.ob-dot-container { display: flex; gap: 8px; justify-content: center; margin-bottom: 20px; }
+.ob-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--s3); transition: 0.3s; }
+.ob-dot.active { width: 24px; border-radius: 4px; background: var(--gold); }
 </style>
 </head>
 <body>
@@ -744,6 +766,45 @@ body.focus-active .cau-block.reading-now {
 </div>
 
 <div id="mobile-overlay" onclick="closeAllPanels()"></div>
+
+<!-- Onboarding Modal -->
+<div id="onboardingModal">
+  <div class="ob-card">
+    <div class="ob-slides" id="obSlides">
+      <!-- Slide 1 -->
+      <div class="ob-slide">
+        <span class="ob-icon">🎙️</span>
+        <h2 class="ob-title">Chào mừng bạn đến với VoiceDoc v2</h2>
+        <p class="ob-text">Công cụ đọc văn bản chuyên nghiệp, hỗ trợ học tập và ôn thi hiệu quả với giọng đọc trí tuệ nhân tạo.</p>
+      </div>
+      <!-- Slide 2 -->
+      <div class="ob-slide">
+        <span class="ob-icon">📂</span>
+        <h2 class="ob-title">Hỗ trợ đa định dạng</h2>
+        <p class="ob-text">Bạn có thể tải lên các file <b>.docx, .pptx, .pdf</b> hoặc <b>.txt</b>. Nội dung sẽ được tự động phân tích thành từng câu để dễ dàng theo dõi.</p>
+      </div>
+      <!-- Slide 3 -->
+      <div class="ob-slide">
+        <span class="ob-icon">🎯</span>
+        <h2 class="ob-title">Chế độ Tập trung</h2>
+        <p class="ob-text">Sử dụng nút <b>"Tập trung"</b> (biểu tượng tâm điểm) để phóng to câu đang đọc và làm mờ các phần xung quanh, giúp bạn quan sát tốt hơn.</p>
+      </div>
+      <!-- Slide 4 -->
+      <div class="ob-slide">
+        <span class="ob-icon">🎧</span>
+        <h2 class="ob-title">Giọng đọc chất lượng</h2>
+        <p class="ob-text">Để có trải nghiệm tốt nhất, hãy sử dụng trình duyệt <b>Microsoft Edge</b> và chọn các giọng đọc có chữ <b>"XỊN"</b> (Online) nhé!</p>
+      </div>
+    </div>
+    
+    <div class="ob-dot-container" id="obDots"></div>
+    
+    <div class="ob-btns">
+      <button class="btn-upload-hdr" id="obPrev" onclick="moveObSlide(-1)" style="background:var(--s3); color:var(--t2); display:none">Quay lại</button>
+      <button class="btn-big" id="obNext" onclick="moveObSlide(1)" style="flex:1; justify-content:center">Tiếp theo</button>
+    </div>
+  </div>
+</div>
 
 <div class="wrap">
 
@@ -1103,8 +1164,45 @@ window.addEventListener('load', () => {
   loadAbbrs();
   loadDocs();
   loadVoices(); 
+  checkFirstVisit();
   synth.addEventListener('voiceschanged', loadVoices); 
 });
+
+let obIdx = 0;
+function checkFirstVisit() {
+  if (!localStorage.getItem('voicedoc_visited')) {
+    document.getElementById('onboardingModal').style.display = 'flex';
+    renderObDots();
+  }
+}
+
+function renderObDots() {
+  const dots = document.getElementById('obDots');
+  const slides = document.querySelectorAll('.ob-slide').length;
+  dots.innerHTML = Array.from({length: slides}).map((_, i) => `<div class="ob-dot ${i===0?'active':''}"></div>`).join('');
+}
+
+function moveObSlide(dir) {
+  const slides = document.querySelectorAll('.ob-slide');
+  obIdx += dir;
+  if (obIdx >= slides.length) {
+    closeOnboarding();
+    return;
+  }
+  if (obIdx < 0) obIdx = 0;
+  
+  document.getElementById('obSlides').style.transform = `translateX(-${obIdx * 100}%)`;
+  document.getElementById('obPrev').style.display = obIdx > 0 ? 'block' : 'none';
+  document.getElementById('obNext').textContent = obIdx === slides.length - 1 ? 'Bắt đầu ngay' : 'Tiếp theo';
+  
+  // Update dots
+  document.querySelectorAll('.ob-dot').forEach((dot, i) => dot.classList.toggle('active', i === obIdx));
+}
+
+function closeOnboarding() {
+  document.getElementById('onboardingModal').style.display = 'none';
+  localStorage.setItem('voicedoc_visited', 'true');
+}
 
 function loadAbbrs() {
   const saved = localStorage.getItem('voicedoc_abbrs');
