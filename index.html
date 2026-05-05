@@ -1170,6 +1170,7 @@ function closeAllPanels() {
   document.getElementById('mobile-overlay').classList.remove('active');
 }
 
+window.addEventListener('load', () => { 
   loadAbbrs();
   loadDocs();
   loadSettings();
@@ -1444,6 +1445,7 @@ function parseCau(text) {
       if (curCau) caus.push(curCau);
       cauCounter++;
       
+      const match = line.match(/^Câu\s*\d+[^:]*[:\.]\s*/i);
       const label = match ? match[0].trim().replace(/[:\.]$/, '') : `Câu ${cauCounter}`;
       const question = line.replace(match?.[0] || '', '').trim();
       
