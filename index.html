@@ -584,6 +584,22 @@ input[type=range] { accent-color: var(--gold); cursor: pointer; }
   .nav-btn { display: flex !important; }
 }
 
+/* Modal */
+#inputModal {
+  position: fixed; inset: 0; background: rgba(11,13,18,0.95);
+  backdrop-filter: blur(10px); z-index: 10000;
+  display: none; flex-direction: column; padding: 20px;
+}
+.modal-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; }
+.modal-title { font-size: 18px; font-weight: 800; color: var(--gold); }
+#modalInp {
+  flex: 1; background: var(--s1); border: 1px solid var(--border);
+  border-radius: var(--r); color: var(--t1); padding: 20px;
+  font-family: inherit; font-size: 15px; line-height: 1.6; resize: none;
+}
+#modalInp:focus { outline: none; border-color: var(--gold); }
+.modal-btns { display: flex; gap: 10px; margin-top: 15px; }
+
 .nav-btn {
   display: none;
   width: 34px; height: 34px;
@@ -622,6 +638,19 @@ input[type=range] { accent-color: var(--gold); cursor: pointer; }
   </div>
 </div>
 
+<!-- Input Modal -->
+<div id="inputModal">
+  <div class="modal-hdr">
+    <span class="modal-title" id="modalTitle">Nhập văn bản mới</span>
+    <button class="btn-upload-hdr" style="background:var(--s3); color:var(--t2)" onclick="closeModal()">Đóng ✕</button>
+  </div>
+  <input type="text" id="modalDocName" placeholder="Tên tài liệu..." style="background:var(--s2); border:1px solid var(--border); color:var(--gold); border-radius:8px; padding:10px 15px; margin-bottom:10px; font-family:inherit; font-weight:700">
+  <textarea id="modalInp" placeholder="Dán hoặc nhập văn bản của bạn tại đây..."></textarea>
+  <div class="modal-btns">
+    <button class="btn-big" style="flex:1; justify-content:center" onclick="saveModal()">Lưu & Phân tích văn bản</button>
+  </div>
+</div>
+
 <div id="mobile-overlay" onclick="closeAllPanels()"></div>
 
 <div class="wrap">
@@ -649,6 +678,7 @@ input[type=range] { accent-color: var(--gold); cursor: pointer; }
   <div class="viewer">
     <div class="viewer-bar">
       <span class="vbar-title" id="vTitle">— Chọn hoặc tải tài liệu —</span>
+      <button class="btn-add-queue" id="btnEditRaw" style="display:none; margin-right:10px" onclick="openEditRaw()">📝 Sửa toàn bộ</button>
       <div class="vbar-ctrl">
         <span class="vbar-label">Cỡ chữ</span>
         <input type="range" min="12" max="22" value="15" id="fszRange" oninput="setFontSize(this.value)" style="width:70px">
@@ -1146,24 +1176,67 @@ function selectDoc(id) {
   if (state.playing) stopAll();
   state.activeDoc = state.docs.find(d => d.id == id);
   renderDocList();
-  if (!state.activeDoc) return;
+  if (!state.activeDoc) {
+    document.getElementById('btnEditRaw').style.display = 'none';
+    return;
+  }
+  document.getElementById('btnEditRaw').style.display = 'block';
   document.getElementById('vTitle').textContent = state.activeDoc.name;
   renderTextView();
 }
 
 function addNewDoc() {
-  const name = prompt("Nhập tên văn bản:", "Văn bản mới " + (state.docs.length + 1));
-  if (name === null) return;
-  const doc = {
-    id: Date.now(),
-    name: name || "Chưa đặt tên",
-    ext: 'txt',
-    raw: '',
-    caus: [{ id: 1, label: 'Đoạn 1', question: 'Nhập tiêu đề hoặc câu hỏi ở đây...', body: ['Nhấn vào đây để bắt đầu nhập nội dung của bạn...'], chap: '' }]
-  };
-  state.docs.push(doc);
-  renderDocList();
-  selectDoc(doc.id);
+  document.getElementById('modalTitle').textContent = "Nhập văn bản mới";
+  document.getElementById('modalDocName').value = "Văn bản mới " + (state.docs.length + 1);
+  document.getElementById('modalInp').value = "";
+  document.getElementById('inputModal').style.display = "flex";
+  state.modalMode = 'new';
+}
+
+function openEditRaw() {
+  if (!state.activeDoc) return;
+  document.getElementById('modalTitle').textContent = "Sửa văn bản: " + state.activeDoc.name;
+  document.getElementById('modalDocName').value = state.activeDoc.name;
+  
+  // Reconstruct raw text from caus
+  let raw = state.activeDoc.caus.map(c => {
+    let t = c.question ? (c.label + ": " + c.question) : "";
+    return t + "\n" + c.body.join("\n");
+  }).join("\n\n");
+  
+  document.getElementById('modalInp').value = raw;
+  document.getElementById('inputModal').style.display = "flex";
+  state.modalMode = 'edit';
+}
+
+function closeModal() {
+  document.getElementById('inputModal').style.display = "none";
+}
+
+async function saveModal() {
+  const name = document.getElementById('modalDocName').value.trim() || "Chưa đặt tên";
+  const text = document.getElementById('modalInp').value.trim();
+  if (!text) { alert("Vui lòng nhập nội dung"); return; }
+  
+  showLoad("Đang phân tích...");
+  setTimeout(() => {
+    const caUs = parseCau(text);
+    if (state.modalMode === 'new') {
+      const doc = { id: Date.now(), name, ext: 'txt', raw: text, caus: caUs };
+      state.docs.push(doc);
+      renderDocList();
+      selectDoc(doc.id);
+    } else {
+      state.activeDoc.name = name;
+      state.activeDoc.raw = text;
+      state.activeDoc.caus = caUs;
+      document.getElementById('vTitle').textContent = name;
+      renderDocList();
+      renderTextView();
+    }
+    closeModal();
+    hideLoad();
+  }, 100);
 }
 
 function removeDoc(e, id) {
