@@ -890,7 +890,15 @@ body.focus-active .cau-block.reading-now {
       </div>
       <div class="ctrl-row">
         <label>Lặp mặc định</label>
-        <input type="number" min="1" max="100" value="1" id="defRepInp" onchange="state.defRepeat=Math.max(1,+this.value)" style="width:50px;background:var(--s3);border:1px solid var(--border);color:var(--gold);border-radius:4px;padding:2px 5px;font-family:'Space Mono',monospace;text-align:center">
+        <input type="number" min="1" max="100" value="1" id="defRepInp" onchange="state.defRepeat=Math.max(1,+this.value); saveSettings()" style="width:50px;background:var(--s3);border:1px solid var(--border);color:var(--gold);border-radius:4px;padding:2px 5px;font-family:'Space Mono',monospace;text-align:center">
+      </div>
+      <div class="ctrl-row">
+        <label title="Đọc cả 'Câu 1', 'Câu 2'...">Đọc tên câu</label>
+        <input type="checkbox" id="readLabelInp" checked onchange="state.readLabel=this.checked; saveSettings()" style="width:18px; height:18px; accent-color:var(--gold); cursor:pointer">
+      </div>
+      <div class="ctrl-row">
+        <label title="Lặp lại danh sách đọc từ đầu khi kết thúc">Lặp toàn bộ</label>
+        <input type="checkbox" id="loopInp" onchange="state.loop=this.checked; saveSettings()" style="width:18px; height:18px; accent-color:var(--gold); cursor:pointer">
       </div>
     </div>
 
@@ -1000,6 +1008,8 @@ const state = {
   rate: 1.0,
   vol: 0.9,
   pauseMs: 500,
+  readLabel: true,
+  loop: false,
   focusMode: false,
   selRepeat: 1,
   selText: '',
@@ -1160,13 +1170,49 @@ function closeAllPanels() {
   document.getElementById('mobile-overlay').classList.remove('active');
 }
 
-window.addEventListener('load', () => { 
   loadAbbrs();
   loadDocs();
+  loadSettings();
   loadVoices(); 
   checkFirstVisit();
   synth.addEventListener('voiceschanged', loadVoices); 
 });
+
+function saveSettings() {
+  const s = {
+    rate: state.rate,
+    vol: state.vol,
+    pauseMs: state.pauseMs,
+    readLabel: state.readLabel,
+    loop: state.loop,
+    defRepeat: state.defRepeat || 1
+  };
+  localStorage.setItem('voicedoc_settings', JSON.stringify(s));
+}
+
+function loadSettings() {
+  const saved = localStorage.getItem('voicedoc_settings');
+  if (saved) {
+    try {
+      const s = JSON.parse(saved);
+      if (s.rate !== undefined) updateRate(s.rate, true);
+      if (s.vol !== undefined) updateVol(s.vol, true);
+      if (s.pauseMs !== undefined) updatePause(s.pauseMs, true);
+      if (s.readLabel !== undefined) {
+        state.readLabel = s.readLabel;
+        document.getElementById('readLabelInp').checked = s.readLabel;
+      }
+      if (s.loop !== undefined) {
+        state.loop = s.loop;
+        document.getElementById('loopInp').checked = s.loop;
+      }
+      if (s.defRepeat !== undefined) {
+        state.defRepeat = s.defRepeat;
+        document.getElementById('defRepInp').value = s.defRepeat;
+      }
+    } catch(e) {}
+  }
+}
 
 let obIdx = 0;
 function checkFirstVisit() {
@@ -1398,11 +1444,10 @@ function parseCau(text) {
       if (curCau) caus.push(curCau);
       cauCounter++;
       
-      const match = line.match(/^Câu\s*\d+[^:]*[:\.]\s*/i);
       const label = match ? match[0].trim().replace(/[:\.]$/, '') : `Câu ${cauCounter}`;
       const question = line.replace(match?.[0] || '', '').trim();
       
-      curCau = { id: cauCounter, label, question: question || "...", body: [], chap: chapLabel };
+      curCau = { id: cauCounter, label, question: question || "", body: [], chap: chapLabel };
     } else if (curCau) {
       curCau.body.push(line);
     } else {
@@ -1557,6 +1602,9 @@ function renderTextView() {
         <div class="cau-hdr">
           <span class="cau-num">${esc(c.label)}</span>
           <div class="cau-actions">
+            <button class="btn-add-queue" style="background:var(--s3); color:var(--t2); border-color:var(--border)" onclick="readCauNow(${c.id})" title="Đọc câu này ngay lập tức">
+              ▶ Đọc
+            </button>
             <button class="btn-add-queue ${inQ?'in-queue':''}" id="qaBtn-${c.id}" onclick="toggleCauQueue(${c.id})">
               ${inQ ? '✓ Đã thêm' : '+ Thêm'}
             </button>
@@ -1790,11 +1838,24 @@ function preprocessText(text) {
 
 function speakCurrent() {
   if (!state.playing || state.paused) return;
-  if (state.qIdx >= state.queue.length) { finishRead(); return; }
+  if (state.qIdx >= state.queue.length) {
+    if (state.loop && state.queue.length > 0) {
+      state.qIdx = 0;
+      state.qRepeatNow = 0;
+      speakCurrent();
+    } else {
+      finishRead();
+    }
+    return;
+  }
   const item = state.queue[state.qIdx];
 
   // Tiền xử lý từ viết tắt
-  const textToSpeak = preprocessText(item.text);
+  let textToSpeak = item.text;
+  if (state.readLabel && item.label && item.type === 'cau') {
+    textToSpeak = item.label + ". " + textToSpeak;
+  }
+  textToSpeak = preprocessText(textToSpeak);
 
   // Update repeat counter display
   const totalRepeats = item.repeat;
@@ -1891,7 +1952,14 @@ function skipNext() {
   synth.cancel();
   state.qRepeatNow = 0;
   state.qIdx++;
-  if (state.qIdx >= state.queue.length) { finishRead(); return; }
+  if (state.qIdx >= state.queue.length) {
+    if (state.loop && state.queue.length > 0) {
+      state.qIdx = 0;
+    } else {
+      finishRead();
+      return;
+    }
+  }
   setTimeout(speakCurrent, 100);
 }
 
@@ -1901,7 +1969,11 @@ function skipPrev() {
   if (cur) highlightReading(cur.cauId, false);
   synth.cancel();
   state.qRepeatNow = 0;
-  if (state.qIdx > 0) state.qIdx--;
+  if (state.qIdx > 0) {
+    state.qIdx--;
+  } else if (state.loop && state.queue.length > 0) {
+    state.qIdx = state.queue.length - 1;
+  }
   setTimeout(speakCurrent, 100);
 }
 
@@ -1954,22 +2026,42 @@ function setStateBadge(type) {
   el.textContent = map[type][1];
 }
 
+function readCauNow(cauId) {
+  const doc = state.activeDoc;
+  if (!doc) return;
+  const cau = doc.caus.find(c => c.id === cauId);
+  if (!cau) return;
+  
+  stopAll();
+  const fullText = [cau.question, ...cau.body].filter(Boolean).join('. ');
+  state.queue = [{ id: 'temp-' + Date.now(), cauId, type: 'cau', label: cau.label, text: fullText, repeat: 1 }];
+  renderQueueList();
+  updateCauButtons();
+  startRead();
+}
+
 /* ============================================================
    UTILS
 ============================================================ */
-function updateRate(v) {
+function updateRate(v, skipSave) {
   state.rate = +v;
+  document.getElementById('rateR').value = v;
   document.getElementById('rateV').textContent = state.rate.toFixed(1) + '×';
+  if (!skipSave) saveSettings();
   restartCurrentIfPlaying();
 }
-function updateVol(v) {
+function updateVol(v, skipSave) {
   state.vol = +v;
+  document.getElementById('volR').value = v;
   document.getElementById('volV').textContent = Math.round(state.vol * 100) + '%';
+  if (!skipSave) saveSettings();
   restartCurrentIfPlaying();
 }
-function updatePause(v) {
+function updatePause(v, skipSave) {
   state.pauseMs = +v;
+  document.getElementById('pauseR').value = v;
   document.getElementById('pauseV').textContent = (state.pauseMs / 1000).toFixed(2) + 's';
+  if (!skipSave) saveSettings();
 }
 
 let restartTimer = null;
