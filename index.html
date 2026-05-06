@@ -404,6 +404,8 @@ body.focus-active .cau-block.reading-now {
 .cau-body.reading-now { background: var(--gold-dim); color: var(--t1); }
 .cau-content { padding: 14px 16px; background: var(--s1); font-size: 14px; line-height: 1.9; color: var(--t2); cursor: text; user-select: text; }
 .cau-content.reading-now { background: var(--gold-dim); color: var(--t1); }
+.cau-line { transition: all 0.3s ease; padding: 2px 4px; margin: -2px -4px; border-radius: 4px; }
+.cau-line.reading-now { color: var(--gold) !important; background: rgba(245, 188, 42, 0.15); box-shadow: 0 0 10px rgba(245, 188, 42, 0.1); }
 [contenteditable] { cursor: text; -webkit-user-modify: read-write-plaintext-only; user-select: text !important; }
 [contenteditable]:focus { outline: none; background: rgba(240,180,41,0.08); border-radius: 4px; box-shadow: inset 0 0 0 1px var(--gold-glow); }
 
@@ -1025,7 +1027,9 @@ const state = {
     "th": "trường hợp",
     "sl": "số lượng",
     "đv": "đơn vị"
-  }
+  },
+  utterId: 0,
+  isSpeaking: false // Cờ kiểm tra xem AI có đang thực sự phát âm thanh hay không
 };
 let synth = window.speechSynthesis;
 let utter = null;
@@ -1422,57 +1426,49 @@ async function readPdf(file) {
 /* ============================================================
    PARSE "CÂU" STRUCTURE
 ============================================================ */
+function splitToLines(text) {
+  if (!text) return [];
+  // Chia nhỏ theo dấu chấm, chấm hỏi, chấm than, hai chấm, chấm phẩy và xuống dòng
+  // Sử dụng lookbehind để giữ lại dấu ngắt câu
+  return text.split(/(?<=[.?!:;\n])\s+/).map(s => s.trim()).filter(Boolean);
+}
+
 function parseCau(text) {
   if (!text) return [];
-  
-  // Chuẩn hóa văn bản
   const normalizedText = text.replace(/\r\n/g, '\n');
-  
-  // Regex tìm marker "Câu X" (hỗ trợ nhiều loại dấu ngăn cách và không nhất thiết phải ở đầu dòng)
-  // Giải thích: Tìm "Câu", khoảng trắng tùy chọn, số, và dấu ngăn cách (:, ., -, hoặc khoảng trắng)
   const cauRegex = /(?:^|\n|\s{2,})(Câu\s*\d+(?:[\s\w]*?)(?:[:\.\-\s]))/gi;
-  
   const parts = normalizedText.split(cauRegex);
   const caus = [];
   let cauCounter = 0;
   let currentChap = "";
   const chapPattern = /^(CHƯƠNG|Phần|Chapter|PHẦN)\s*.*$/i;
 
-  // Xử lý phần text trước "Câu 1" nếu có
   let firstPart = parts[0] ? parts[0].trim() : "";
   if (firstPart) {
-    const lines = firstPart.split('\n').map(l => l.trim()).filter(Boolean);
+    const lines = splitToLines(firstPart);
     let headText = "";
     lines.forEach(l => {
       if (chapPattern.test(l)) currentChap = l;
-      else headText += (headText ? "\n" : "") + l;
+      else headText += (headText ? " " : "") + l;
     });
-    
     if (headText) {
       cauCounter++;
       caus.push({ id: cauCounter, label: "Mở đầu", question: headText, body: [], chap: currentChap });
     }
   }
 
-  // Duyệt qua các cặp [marker, content]
   for (let i = 1; i < parts.length; i += 2) {
     const marker = parts[i].trim();
     const content = parts[i + 1] ? parts[i + 1].trim() : "";
-    
     if (!marker && !content) continue;
 
-    const contentLines = content.split('\n').map(l => l.trim()).filter(Boolean);
+    const allLines = splitToLines(content);
     let question = "";
     let body = [];
-    
-    contentLines.forEach((line, idx) => {
-      if (chapPattern.test(line)) {
-        currentChap = line;
-      } else if (!question) {
-        question = line;
-      } else {
-        body.push(line);
-      }
+    allLines.forEach(line => {
+      if (chapPattern.test(line)) currentChap = line;
+      else if (!question) question = line;
+      else body.push(line);
     });
 
     cauCounter++;
@@ -1485,7 +1481,6 @@ function parseCau(text) {
     });
   }
 
-  // Fallback nếu không dùng từ "Câu" mà dùng số 1. 2.
   if (caus.length <= 1 && !text.toLowerCase().includes('câu')) {
     const fallbackRegex = /(?:^|\n)(\d+[\.\)]\s+)/g;
     const fbParts = normalizedText.split(fallbackRegex);
@@ -1495,20 +1490,13 @@ function parseCau(text) {
       for (let i = 1; i < fbParts.length; i += 2) {
         const marker = fbParts[i].trim();
         const content = fbParts[i+1] ? fbParts[i+1].trim() : "";
-        const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
+        const lines = splitToLines(content);
         fbCounter++;
-        fbCaus.push({
-          id: fbCounter,
-          label: marker,
-          question: lines[0] || "...",
-          body: lines.slice(1),
-          chap: ""
-        });
+        fbCaus.push({ id: fbCounter, label: marker, question: lines[0] || "...", body: lines.slice(1), chap: "" });
       }
       return fbCaus;
     }
   }
-
   return caus.length > 0 ? caus : [{ id: 1, label: "Đoạn 1", question: "", body: [text.trim()], chap: "" }];
 }
 
@@ -1627,7 +1615,15 @@ function renderTextView() {
       html += `<div style="margin:24px 0 16px;padding:10px 14px;background:var(--s2);border-left:3px solid var(--gold);border-radius:0 var(--r2) var(--r2) 0;font-size:12px;font-weight:700;color:var(--gold);letter-spacing:.5px">${esc(c.chap)}</div>`;
     }
     const inQ = isInQueue(c.id, 'cau');
-    const bodyHtml = c.body.map(l => `<p style="margin-bottom:6px">${esc(l)}</p>`).join('');
+    
+    // Chia nhỏ question và body thành các dòng thực tế sẽ đọc
+    const qLines = splitToLines(c.question);
+    const bLines = c.body.flatMap(l => splitToLines(l));
+    let lineIdx = 0;
+
+    const qHtml = qLines.map(l => `<div class="cau-line cau-q-part" id="line-${c.id}-${lineIdx++}" style="font-weight:700; color:var(--t1); margin-bottom:4px">${esc(l)}</div>`).join('');
+    const bHtml = bLines.map(l => `<div class="cau-line cau-b-part" id="line-${c.id}-${lineIdx++}" style="margin-bottom:4px">${esc(l)}</div>`).join('');
+
     html += `
       <div class="cau-block ${inQ?'in-queue':''}" id="cb-${c.id}">
         <div class="cau-hdr">
@@ -1642,8 +1638,8 @@ function renderTextView() {
           </div>
         </div>
         <div class="cau-content" id="ccontent-${c.id}" contenteditable="true" onmousedown="event.stopPropagation()" onclick="this.focus()" onblur="updateCauText(${c.id}, this)">
-          <div class="cau-q-text" style="font-weight:700; color:var(--t1); margin-bottom:8px">${esc(c.question)}</div>
-          <div class="cau-b-text" style="color:var(--t2)">${bodyHtml}</div>
+          <div class="cau-q-container" style="margin-bottom:8px">${qHtml}</div>
+          <div class="cau-b-container" style="color:var(--t2)">${bHtml}</div>
         </div>
       </div>`;
   });
@@ -1655,17 +1651,18 @@ function updateCauText(cauId, el) {
   const cau = state.activeDoc.caus.find(c => c.id === cauId);
   if (!cau) return;
   
-  const qEl = el.querySelector('.cau-q-text');
-  const bEl = el.querySelector('.cau-b-text');
+  const qEl = el.querySelector('.cau-q-container');
+  const bEl = el.querySelector('.cau-b-container');
   
   cau.question = qEl ? qEl.innerText.trim() : "";
-  // Lấy các dòng từ body, bỏ qua các thẻ p nếu cần
   cau.body = bEl ? bEl.innerText.split('\n').filter(l => l.trim()) : [];
   
   // Cập nhật hàng chờ
   state.queue.forEach(q => {
     if (q.cauId === cauId && q.type === 'cau') {
-      q.text = [cau.question, ...cau.body].filter(Boolean).join('. ');
+      const lines = splitToLines([cau.question, ...cau.body].filter(Boolean).join(' '));
+      q.text = lines.join(' ');
+      q.lines = lines;
     }
   });
   renderQueueList();
@@ -1687,8 +1684,9 @@ function toggleCauQueue(cauId) {
   if (!doc) return;
   const cau = doc.caus.find(c => c.id === cauId);
   if (!cau) return;
-  const fullText = [cau.question, ...cau.body].filter(Boolean).join('. ');
-  addToQueue({ cauId, type: 'cau', label: cau.label, text: fullText, repeat: state.defRepeat || 1 });
+  const lines = splitToLines([cau.question, ...cau.body].filter(Boolean).join(' '));
+  const fullText = lines.join(' ');
+  addToQueue({ cauId, type: 'cau', label: cau.label, text: fullText, lines, repeat: state.defRepeat || 1 });
 }
 
 function addAllToQueue() {
@@ -1696,8 +1694,9 @@ function addAllToQueue() {
   if (!doc) return;
   doc.caus.forEach(c => {
     if (!isInQueue(c.id, 'cau')) {
-      const fullText = [c.question, ...c.body].filter(Boolean).join('. ');
-      state.queue.push({ id: Date.now() + Math.random(), cauId: c.id, type: 'cau', label: c.label, text: fullText, repeat: state.defRepeat || 1 });
+      const lines = splitToLines([c.question, ...c.body].filter(Boolean).join(' '));
+      const fullText = lines.join(' ');
+      state.queue.push({ id: Date.now() + Math.random(), cauId: c.id, type: 'cau', label: c.label, text: fullText, lines, repeat: state.defRepeat || 1 });
     }
   });
   renderQueueList();
@@ -1829,7 +1828,8 @@ function closeSelPopup() {
 function addSelToQueue() {
   const text = state.selText;
   if (!text) return;
-  addToQueue({ cauId: null, type: 'sel', label: '📌 Đoạn chọn', text, repeat: state.selRepeat || 1 });
+  const lines = splitToLines(text);
+  addToQueue({ cauId: null, type: 'sel', label: '📌 Đoạn chọn', text, lines, repeat: state.selRepeat || 1 });
   closeSelPopup();
 }
 
@@ -1848,6 +1848,7 @@ function startRead() {
   state.paused = false;
   state.qIdx = 0;
   state.qRepeatNow = 0;
+  state.lineIdx = 0; // Thêm chỉ số dòng đang đọc
   updatePlayerUI();
   speakCurrent();
 }
@@ -1873,86 +1874,119 @@ function speakCurrent() {
     if (state.loop && state.queue.length > 0) {
       state.qIdx = 0;
       state.qRepeatNow = 0;
+      state.lineIdx = 0;
       speakCurrent();
     } else {
       finishRead();
     }
     return;
   }
+  
   const item = state.queue[state.qIdx];
+  const lines = item.lines || [item.text];
+  
+  if (state.lineIdx >= lines.length) {
+    state.qRepeatNow++;
+    if (state.qRepeatNow < item.repeat) {
+      state.lineIdx = 0;
+      setTimeout(speakCurrent, state.pauseMs);
+    } else {
+      highlightReading(item.cauId, false);
+      state.qRepeatNow = 0;
+      state.qIdx++;
+      state.lineIdx = 0;
+      setTimeout(speakCurrent, state.pauseMs);
+    }
+    return;
+  }
 
-  // Tiền xử lý từ viết tắt
-  let textToSpeak = item.text;
-  if (state.readLabel && item.label && item.type === 'cau') {
+  // Tạo ID mới cho lần đọc này để tránh xung đột khi cancel/restart
+  const myUtterId = ++state.utterId;
+
+  let textToSpeak = lines[state.lineIdx];
+  if (state.lineIdx === 0 && state.readLabel && item.label && item.type === 'cau') {
     textToSpeak = item.label + ". " + textToSpeak;
   }
-  textToSpeak = preprocessText(textToSpeak);
+  
+  const processedText = preprocessText(textToSpeak);
 
-  // Update repeat counter display
   const totalRepeats = item.repeat;
   const thisRepeat = state.qRepeatNow + 1;
   const rpEl = document.getElementById(`rpNow-${item.id}`);
   if (rpEl) rpEl.textContent = totalRepeats > 1 ? `${thisRepeat}/${totalRepeats}` : '';
 
-  // Update player info
   document.getElementById('playerCau').textContent = item.label + (totalRepeats > 1 ? ` — lần ${thisRepeat}/${totalRepeats}` : '');
-  document.getElementById('playerSen').textContent = item.text;
+  document.getElementById('playerSen').textContent = lines[state.lineIdx];
   setStateBadge('play');
 
-  // Highlight in text view
-  highlightReading(item.cauId, true);
+  highlightReading(item.cauId, true, state.lineIdx);
   scrollQueueTo(state.qIdx);
   updateProgress();
 
-  const u = new SpeechSynthesisUtterance(textToSpeak);
+  const u = new SpeechSynthesisUtterance(processedText);
   if (state.selVoice) u.voice = state.selVoice;
   u.lang = state.selVoice?.lang || 'vi-VN';
   u.rate = state.rate;
   u.volume = state.vol;
 
-  u.onend = () => {
-    if (!state.playing || state.paused) return;
-    state.qRepeatNow++;
-    if (state.qRepeatNow < item.repeat) {
-      // Repeat same item
-      setTimeout(speakCurrent, state.pauseMs);
-    } else {
-      // Next item
-      highlightReading(item.cauId, false);
-      state.qRepeatNow = 0;
-      state.qIdx++;
-      setTimeout(speakCurrent, state.pauseMs);
+  u.onstart = () => {
+    if (state.utterId === myUtterId) {
+      state.isSpeaking = true;
+      updatePlayerUI();
     }
   };
-  u.onerror = ev => {
-    if (ev.error === 'interrupted') return;
-    state.qRepeatNow = 0;
-    state.qIdx++;
-    setTimeout(speakCurrent, 300);
+
+  u.onend = () => {
+    if (state.utterId !== myUtterId) return;
+    state.isSpeaking = false;
+    if (state.paused) return;
+    state.lineIdx++;
+    speakCurrent();
   };
+
+  u.onerror = ev => {
+    if (state.utterId !== myUtterId) return;
+    state.isSpeaking = false;
+    if (ev.error === 'interrupted') return;
+    state.lineIdx++;
+    setTimeout(speakCurrent, 100);
+  };
+
   utter = u;
+  synth.cancel();
   synth.speak(u);
-  updatePlayerUI();
 }
 
 function pauseRead() {
-  synth.pause();
   state.paused = true;
+  synth.pause(); // Sử dụng pause thật của trình duyệt
   setStateBadge('pause');
   updatePlayerUI();
 }
 
 function resumeRead() {
-  synth.resume();
+  if (!state.playing) return;
   state.paused = false;
+  synth.resume(); // Thử resume trước
+  
+  // Fallback: Một số trình duyệt bị lỗi resume không hoạt động sau một thời gian
+  // Kiểm tra sau 100ms nếu vẫn im lặng thì ép đọc lại dòng hiện tại
+  setTimeout(() => {
+    if (state.playing && !state.paused && !synth.speaking) {
+      speakCurrent();
+    }
+  }, 100);
+  
   setStateBadge('play');
   updatePlayerUI();
 }
 
 function stopAll() {
+  state.utterId++;
   synth.cancel();
   state.playing = false;
   state.paused = false;
+  state.isSpeaking = false;
   // Clear all highlights
   document.querySelectorAll('.cau-block.reading-now').forEach(el => el.classList.remove('reading-now'));
   document.querySelectorAll('.cau-body.reading-now').forEach(el => el.classList.remove('reading-now'));
@@ -2008,13 +2042,26 @@ function skipPrev() {
   setTimeout(speakCurrent, 100);
 }
 
-function highlightReading(cauId, on) {
+function highlightReading(cauId, on, lineIdx) {
   if (!cauId) return;
   const cb = document.getElementById(`cb-${cauId}`);
   const ccontent = document.getElementById(`ccontent-${cauId}`);
+  
   cb?.classList.toggle('reading-now', on);
   ccontent?.classList.toggle('reading-now', on);
-  if (on && cb) cb.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  
+  // Xóa highlight cũ của các dòng
+  document.querySelectorAll('.cau-line.reading-now').forEach(el => el.classList.remove('reading-now'));
+  
+  if (on && lineIdx !== undefined) {
+    const lineEl = document.getElementById(`line-${cauId}-${lineIdx}`);
+    if (lineEl) {
+      lineEl.classList.add('reading-now');
+      lineEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } else if (cb) {
+      cb.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }
 }
 
 function scrollQueueTo(idx) {
@@ -2064,8 +2111,9 @@ function readCauNow(cauId) {
   if (!cau) return;
   
   stopAll();
-  const fullText = [cau.question, ...cau.body].filter(Boolean).join('. ');
-  state.queue = [{ id: 'temp-' + Date.now(), cauId, type: 'cau', label: cau.label, text: fullText, repeat: 1 }];
+  const lines = splitToLines([cau.question, ...cau.body].filter(Boolean).join(' '));
+  const fullText = lines.join(' ');
+  state.queue = [{ id: 'temp-' + Date.now(), cauId, type: 'cau', label: cau.label, text: fullText, lines, repeat: 1 }];
   renderQueueList();
   updateCauButtons();
   startRead();
@@ -2097,12 +2145,12 @@ function updatePause(v, skipSave) {
 
 let restartTimer = null;
 function restartCurrentIfPlaying() {
-  if (state.playing && !state.paused) {
-    // Thêm debounce để tránh lag khi kéo slider nhanh
+  // Chỉ restart nếu đang chơi, không bị tạm dừng VÀ AI đang thực sự phát tiếng
+  // Điều này tránh việc nhảy về đầu câu khi đang ở trong khoảng nghỉ (pauseMs)
+  if (state.playing && !state.paused && state.isSpeaking) {
     clearTimeout(restartTimer);
     restartTimer = setTimeout(() => {
-      synth.cancel();
-      speakCurrent();
+      speakCurrent(); 
     }, 200);
   }
 }
